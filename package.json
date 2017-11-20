@@ -1,0 +1,29 @@
+{
+  "name": "e-crawl",
+  "version": "1.0.0",
+  "description": "爬取64卦数据",
+  "main": "index.js",
+  "dependencies": {
+    "axios": "~0.17.1",
+    "cheerio": "~1.0.0-rc.2",
+    "iconv-lite": "~0.4.19"
+  },
+  "devDependencies": {
+    "babel-cli": "~6.26.0",
+    "babel-preset-env": "~1.6.1"
+  },
+  "scripts": {
+    "start": "npm run build && node ./build/index.js",
+    "build": "babel ./src --out-dir build"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/dmccer/e-crawl.git"
+  },
+  "author": "Kane",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/dmccer/e-crawl/issues"
+  },
+  "homepage": "https://github.com/dmccer/e-crawl#readme"
+}
