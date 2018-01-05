@@ -5,5 +5,8 @@
         "node": "6.11"
       }
     }]
+  ],
+  "plugins": [
+    "transform-remove-strict-mode"
   ]
 }

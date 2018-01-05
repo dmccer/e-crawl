@@ -6,14 +6,19 @@
   "dependencies": {
     "axios": "~0.17.1",
     "cheerio": "~1.0.0-rc.2",
-    "iconv-lite": "~0.4.19"
+    "iconv-lite": "~0.4.19",
+    "js-beautify": "~1.7.5",
+    "log4js": "~2.4.1",
+    "mysql2": "~1.5.1",
+    "sequelize": "~4.28.8"
   },
   "devDependencies": {
     "babel-cli": "~6.26.0",
+    "babel-plugin-transform-remove-strict-mode": "~0.0.2",
     "babel-preset-env": "~1.6.1"
   },
   "scripts": {
-    "start": "npm run build && node ./build/index.js",
+    "start": "npm run build && node ./build/pbc.js",
     "build": "babel ./src --out-dir build"
   },
   "repository": {

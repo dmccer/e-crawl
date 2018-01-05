@@ -1,5 +1,4 @@
-// $$('#text table')
-
+// 中华周易网数据抓取
 const fs = require('fs');
 const path = require('path');
 const url = require('url');
