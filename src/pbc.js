@@ -6,16 +6,15 @@ const cheerio = require('cheerio');
 const iconv = require('iconv-lite');
 const log4js = require('log4js');
 const beautify = require('js-beautify').js_beautify;
+const queue = require('queue');
+const schedule = require('node-schedule');
+
 const unpacker_filter = require('./lib');
 const News = require('./model/news');
 
 const PROTOCOL = 'http://';
 const HOST = 'www.pbc.gov.cn';
 const TARGET_URL = `${PROTOCOL}${HOST}`;
-const ENTRY_PATH = '/';
-const DESC_PATH = path.resolve(__dirname, './descs');
-const BGLIST_FILE = path.join(DESC_PATH, './list.json');
-
 const LOG_CAT = 'pbc_crawl';
 const URGENT_LOG = '[URGENT]';
 
@@ -37,9 +36,6 @@ log4js.configure({
   }
 });
 const logger = log4js.getLogger();
-
-
-
 
 /**
  * 解码 html
@@ -137,7 +133,10 @@ async function infiltrate() {
   }
 }
 
-async function loadList() {
+/**
+ * 爬取首页新闻列表数据
+ */
+async function crawlHomePage() {
   logger.info('1. 获取主页面...')
   try {
     const homeRes = await axios(TARGET_URL, {
@@ -161,7 +160,7 @@ async function loadList() {
     $list.each((i, link) => {
       ret.push(parseLink($(link)));
     });
-    logger.info(' 分析主页面数据成功');
+    logger.info('  分析主页面数据成功');
     
     return ret;
   } catch (err) {
@@ -169,37 +168,74 @@ async function loadList() {
   }
 }
 
-async function loadDetail(list) {
-  logger.info('1. 获取详情页面成功...');
-  const reqs = list.map((item) => {
-    return axios(item.url, {
-      headers: Object.assign({}, defaultHeaders, {
-        Cookie: getUsefulCookies()
-      })
-    });
-  });
+/**
+ * 给 job 生成 id
+ * @param {*} fn 
+ * @param {*} id 
+ */
+function genIdentifiedJob(fn, id) {
+  const _fn = fn;
+  _fn.id = id;
 
-  return Promise.all(reqs)
-    .then((res) => {
-      logger.info('  获取详情页面成功');
-      try {
-        logger.info('2. 分析详情页面数据...');
-        const ret = res.map((res, index) => {
-          const detail = parseDetail(res.data);
-
-          return Object.assign({}, list[index], detail);
-        });
-        logger.info('  分析详情页面数据成功');
-        return ret;
-      } catch (err) {
-        logger.info(`  分析详情页面失败，${err.message}`);
-      }
-    })
-    .catch((err) => {
-      logger.error(`  获取详情页面失败，${err.message}`);
-    });
+  return _fn;
 }
 
+/**
+ * 队列式抓取详情页面
+ * @param {*} list 
+ */
+function loadDetailsUseQueue(list) {
+  return new Promise(function (resolve, reject) {
+    const q = queue();
+    // 单个 job 超时时间
+    q.timeout = 5000;
+    // job 结果集
+    let ret = [];
+
+    list.forEach((item, index) => {
+      q.push(genIdentifiedJob(function() {
+        return axios(item.url, {
+          headers: Object.assign({}, defaultHeaders, {
+            Cookie: getUsefulCookies()
+          })
+        }).then((res) => {
+          const detail = parseDetail(res.data);
+          ret.push(Object.assign({}, list[index], detail));
+        });
+      }, index));
+    });
+
+    q.on('success', (result, job) => {
+      logger.info(`job-${job.id} 成功`);
+    });
+
+    q.on('error', (err, job) => {
+      logger.error(`job-${job.id} 出错, ${err.message}`);
+    });
+
+    q.on('timeout', (next, job) => {
+      logger.error(`job-${job.id} 超时`);
+      next();
+    });
+
+    q.start(function (err) {
+      if (err) {
+        logger.error(`jobs 出错: ${err.message}`);
+
+        reject(err);
+
+        return;
+      }
+
+      resolve(ret);
+    });
+  });
+}
+
+/**
+ * 分析详情页面，提取数据
+ * @param {*} html 
+ */
 function parseDetail(html) {
   const $ = cheerio.load(html, {
     normalizeWhitespace: true,
@@ -214,10 +250,17 @@ function parseDetail(html) {
   };
 }
 
+/**
+ * 获取页面安全访问 Cookies
+ */
 function getUsefulCookies() {
   return __cookies;
 }
 
+/**
+ * 分析 a 标签，提取数据
+ * @param {*}  
+ */
 function parseLink($link) {
   return {
     title: $link.attr('title'),
@@ -225,6 +268,10 @@ function parseLink($link) {
   };
 }
 
+/**
+ * 格式化服务端设置的 Cookies，供下次请求时设置 Request 的 Cookies
+ * @param {*} cookies 
+ */
 function formatResponseCookies(cookies) {
   return cookies.map((cookie) => {
     return cookie.replace('; path=/', '');
@@ -233,43 +280,66 @@ function formatResponseCookies(cookies) {
 
 let __cookies;
 
-async function crawlList() {
-  logger.info('------------ 渗透目标站点 -------------')
-  __cookies = await infiltrate();
-  logger.info('------------ 抓取新闻列表 -------------');
-  const list = await loadList();
-  logger.info('------------ 抓取新闻详情 -------------');
-  const details = await loadDetail(list);
+/**
+ * 爬取主流程
+ */
+async function crawl() {
+  try {
+    logger.info('------------ 渗透目标站点 -------------')
+    __cookies = await infiltrate();
 
-  logger.info(`列表数据：${JSON.stringify(list)}`);
+    logger.info('------------ 抓取新闻列表 -------------');
+    const list = await crawlHomePage();
+    logger.info(`列表数据：${JSON.stringify(list)}`);
 
-  if (details && details.length) {
+    logger.info('------------ 抓取新闻详情 -------------');
+    const details = await loadDetailsUseQueue(list);
     logger.info(`********** 成功抓取 ${details.length} 条新闻, 失败 ${list.length - details.length} 条 ***********`);
     logger.info(`详情数据：${JSON.stringify(details)}`);
 
-    const raw = details.map((detail) => {
-      return {
-        title: detail.title,
-        url: detail.url,
-        info_publ_date: detail.date,
-        media: detail.media,
-        tag: '新闻',
-        channel: '央行'
-      };
-    })
-
-    News.bulkCreate(raw).then((news) => {
-      const newsIds = news.map((news) => {
-        return news.get('id')
-      });
-
-      logger.info(`写入数据库 ID 列表: ${newsIds.join()}`);
-    }).catch((err) => {
-      console.log(`写入数据库出错: ${err.message}`);
-    })
-  } else {
-    logger.info(`^^^^^^^^^^ 抓取新闻详情失败 ^^^^^^^^^^^^`);
+    logger.info('------------ 写入数据库 -------------');
+    // saveToDB(details);
+  } catch (err) {
+    logger.error(`抓取出错: ${err.message}`);
   }
 }
 
-crawlList();
+/**
+ * 保存爬取的数据到数据库
+ * @param {*} data 
+ */
+function saveToDB(data) {
+  if (!data || !data.length) {
+    return;
+  }
+
+  const raw = data.map((detail) => {
+    return {
+      title: detail.title,
+      url: detail.url,
+      info_publ_date: detail.date,
+      media: detail.media,
+      tag: '新闻',
+      channel: '央行'
+    };
+  });
+
+  News.bulkCreate(raw)
+    .then((news) => {
+      const newsIds = news.map((news) => {
+        return news.get('id')
+      });
+      
+      logger.info(`写入数据库成功, ID 列表: ${newsIds.join()}`);
+    }).catch((err) => {
+      logger.error(`写入数据库出错: ${err.message}`);
+    });
+}
+
+/**
+ * 开启计划每 5 分钟爬取一次
+ */
+schedule.scheduleJob('*/5 * * * *', function(){
+  logger.info('\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\n\n\n');
+  crawl();
+});
