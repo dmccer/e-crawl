@@ -340,6 +340,6 @@ function saveToDB(data) {
  * 开启计划每 5 分钟爬取一次
  */
 schedule.scheduleJob('*/5 * * * *', function(){
-  logger.info('\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\n\n\n');
+  logger.info('\n\n\n');
   crawl();
 });
